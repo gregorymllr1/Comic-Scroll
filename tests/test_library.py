@@ -78,6 +78,33 @@ def test_damaged_project_json_is_listed_not_hidden(tmp_path):
     assert got[0]["error"]
 
 
+def test_non_object_and_non_utf8_chapters_are_damaged_siblings_remain(tmp_path):
+    write_chapter(tmp_path, "healthy", [page("a", panels=2)])
+    array_dir = tmp_path / "array-chapter"
+    array_dir.mkdir()
+    (array_dir / "project.json").write_text("[1, 2]", encoding="utf-8")
+    binary_dir = tmp_path / "binary-chapter"
+    binary_dir.mkdir()
+    (binary_dir / "project.json").write_bytes(b"\xff\xfe\x80")
+    pages_dir = tmp_path / "bad-pages"
+    pages_dir.mkdir()
+    (pages_dir / "project.json").write_text(
+        json.dumps({"name": "bad-pages", "pages": ["not-a-page"]}),
+        encoding="utf-8",
+    )
+
+    got = {c["id"]: c for c in list_chapters(tmp_path)}
+    assert set(got) == {"healthy", "array-chapter", "binary-chapter", "bad-pages"}
+    assert got["healthy"]["status"] == "reviewed"
+    assert got["healthy"]["page_count"] == 1
+    assert got["healthy"]["panel_count"] == 2
+    assert got["healthy"]["error"] is None
+    for cid in ("array-chapter", "binary-chapter", "bad-pages"):
+        assert got[cid]["status"] == "damaged"
+        assert got[cid]["error"]
+        assert got[cid]["page_count"] == 0
+
+
 # Review Focus #5
 def test_missing_library_root_returns_empty_not_crash(tmp_path):
     assert list_chapters(tmp_path / "does-not-exist") == []

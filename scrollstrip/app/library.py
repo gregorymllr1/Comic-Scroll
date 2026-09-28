@@ -46,29 +46,37 @@ def _status(data: dict, chapter: Path, flagged: int) -> str:
     return "reviewed"
 
 
+def _damaged_chapter(chapter: Path, manifest: Path, exc: Exception) -> dict:
+    try:
+        updated = manifest.stat().st_mtime if manifest.exists() else 0
+    except OSError:
+        updated = 0
+    return {
+        "id": chapter.name, "name": chapter.name, "page_count": 0,
+        "panel_count": 0, "needs_review": 0, "status": "damaged",
+        "updated": updated,
+        "error": f"Could not read project.json: {exc}",
+    }
+
+
 def _read_chapter(chapter: Path) -> dict:
     manifest = chapter / "project.json"
     try:
         data = json.loads(manifest.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        pages = data.get("pages") or []
+        flagged = sum(1 for p in pages if p.get("needs_review"))
         return {
-            "id": chapter.name, "name": chapter.name, "page_count": 0,
-            "panel_count": 0, "needs_review": 0, "status": "damaged",
-            "updated": manifest.stat().st_mtime if manifest.exists() else 0,
-            "error": f"Could not read project.json: {exc}",
+            "id": chapter.name,
+            "name": data.get("name") or chapter.name,
+            "page_count": len(pages),
+            "panel_count": sum(len(p.get("panels") or []) for p in pages),
+            "needs_review": flagged,
+            "status": _status(data, chapter, flagged),
+            "updated": manifest.stat().st_mtime,
+            "error": None,
         }
-    pages = data.get("pages") or []
-    flagged = sum(1 for p in pages if p.get("needs_review"))
-    return {
-        "id": chapter.name,
-        "name": data.get("name") or chapter.name,
-        "page_count": len(pages),
-        "panel_count": sum(len(p.get("panels") or []) for p in pages),
-        "needs_review": flagged,
-        "status": _status(data, chapter, flagged),
-        "updated": manifest.stat().st_mtime,
-        "error": None,
-    }
+    except Exception as exc:
+        return _damaged_chapter(chapter, manifest, exc)
 
 
 def list_chapters(root: Path, active_project_ids: set[str] | None = None) -> list[dict]:
