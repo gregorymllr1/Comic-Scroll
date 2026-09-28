@@ -10,3 +10,7 @@ huggingface_hub>=0.23
 
 # tests
 pytest>=8.0
+
+fastapi>=0.115
+uvicorn>=0.32
+pywebview>=5.3
