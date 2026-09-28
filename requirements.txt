@@ -1,0 +1,12 @@
+opencv-python-headless>=4.8
+numpy>=1.24
+Pillow>=10.0
+PyYAML>=6.0
+pymupdf>=1.24      # PDF ingest
+ultralytics>=8.3
+# torch is required by ultralytics; install a CPU or CUDA build that matches your machine
+# huggingface_hub is optional; used only to fetch the panel YOLO weights
+huggingface_hub>=0.23
+
+# tests
+pytest>=8.0

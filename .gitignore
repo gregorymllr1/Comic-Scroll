@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Downloaded model weights (~119 MB, fetched on first detect run)
+models/
+*.pt
+
+# Chapter projects: scans in, slices and CBZ out. Never source.
+chapter-*/
+work/
+export/
+*.cbz
+*.cbr
+*.cb7
+
+# Frontend (phase 1+)
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
