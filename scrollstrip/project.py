@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,26 @@ def save_project(project_dir: Path, data: dict) -> None:
 
 def page_stem(index: int, source_name: str) -> str:
     return f"{index:03d}-{Path(source_name).stem}"
+
+
+_UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+
+def unique_chapter_dir(root: Path, name: str) -> Path:
+    """A fresh directory for a new chapter.
+
+    Two imports named the same must not land in the same folder: the second
+    init_project would overwrite the first chapter's project.json and destroy
+    every panel edit in it.
+    """
+    slug = _UNSAFE.sub("-", (name or "").strip()).strip(". -")
+    slug = slug or "chapter"
+    candidate = Path(root) / slug
+    counter = 2
+    while candidate.exists():
+        candidate = Path(root) / f"{slug}-{counter}"
+        counter += 1
+    return candidate
 
 
 def init_project(
