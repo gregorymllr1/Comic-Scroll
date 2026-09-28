@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from .clean import _read, _write_jpeg
+from .errors import JobCancelled
 from .project import load_project, save_project
 
 _YOLO_MODEL = None
@@ -354,10 +355,20 @@ def detect_page(image: np.ndarray, project_dir: Path, cfg: dict) -> list[tuple[l
     return filter_boxes(detections, w, h, cfg)
 
 
-def detect_project(project_dir: Path, cfg: dict, overwrite_unlocked: bool = True) -> dict:
+def detect_project(
+    project_dir: Path,
+    cfg: dict,
+    overwrite_unlocked: bool = True,
+    *,
+    progress=None,
+    should_cancel=None,
+) -> dict:
     project = load_project(project_dir)
     quality = int(cfg.get("jpeg_quality", 92))
-    for page in project["pages"]:
+    total = len(project["pages"])
+    for index, page in enumerate(project["pages"], start=1):
+        if should_cancel is not None and should_cancel():
+            raise JobCancelled(f"Cancelled after {index - 1} of {total} pages")
         cleaned = project_dir / page["cleaned"]
         if not cleaned.exists():
             raise FileNotFoundError(f"Cleaned page missing: {cleaned}. Run clean first.")
@@ -385,6 +396,8 @@ def detect_project(project_dir: Path, cfg: dict, overwrite_unlocked: bool = True
         page["needs_review"] = _looks_doubtful(auto_panels, detections, image, cfg)
         preview = draw_preview(image, auto_panels)
         _write_jpeg(project_dir / page["preview"], preview, quality)
+        if progress is not None:
+            progress(index, total, f"Detected {len(auto_panels)} panels on {page['id']}")
     flagged = [p["id"] for p in project["pages"] if p.get("needs_review")]
     if flagged:
         print(f"{len(flagged)} page(s) to check first: {', '.join(flagged)}")

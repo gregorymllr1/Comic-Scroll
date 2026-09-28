@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .errors import JobCancelled
 from .project import load_project, resolve_page_file, save_project
 
 
@@ -249,11 +250,13 @@ def clean_image(image: np.ndarray, cfg: dict) -> np.ndarray:
     return _downscale_max_side(image, max_side)
 
 
-def clean_project(project_dir: Path, cfg: dict) -> dict:
+def clean_project(project_dir: Path, cfg: dict, *, progress=None, should_cancel=None) -> dict:
     project = load_project(project_dir)
     quality = int(cfg.get("jpeg_quality", 92))
     total = len(project["pages"])
     for index, page in enumerate(project["pages"], start=1):
+        if should_cancel is not None and should_cancel():
+            raise JobCancelled(f"Cancelled after {index - 1} of {total} pages")
         print(f"  cleaning {index}/{total} {page['id']}", flush=True)
         src = resolve_page_file(project_dir, page["source"])
         if not src.exists():
@@ -265,5 +268,7 @@ def clean_project(project_dir: Path, cfg: dict) -> dict:
         page["width"] = int(cleaned.shape[1])
         page["height"] = int(cleaned.shape[0])
         page["status"] = "cleaned"
+        if progress is not None:
+            progress(index, total, f"Cleaned {page['id']}")
     save_project(project_dir, project)
     return project

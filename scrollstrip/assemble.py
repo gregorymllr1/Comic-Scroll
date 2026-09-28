@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from .clean import _read, _write_jpeg
+from .errors import JobCancelled
 from .project import load_project, save_project
 
 
@@ -124,7 +125,7 @@ def pack_slices(blocks: list[tuple[np.ndarray, int]], cfg: dict) -> list[np.ndar
     return slices
 
 
-def assemble_project(project_dir: Path, cfg: dict) -> dict:
+def assemble_project(project_dir: Path, cfg: dict, *, progress=None, should_cancel=None) -> dict:
     project = load_project(project_dir)
     quality = int(cfg.get("jpeg_quality", 92))
     slice_dir = project_dir / "export" / "slices"
@@ -134,13 +135,20 @@ def assemble_project(project_dir: Path, cfg: dict) -> dict:
                 old.unlink()
     slice_dir.mkdir(parents=True, exist_ok=True)
 
-    blocks = list(iter_assembled_blocks(project_dir, project, cfg))
+    blocks = []
+    pages_total = len(project["pages"])
+    for page_index, block in enumerate(iter_assembled_blocks(project_dir, project, cfg), start=1):
+        if should_cancel is not None and should_cancel():
+            raise JobCancelled("Cancelled during composition")
+        blocks.append(block)
     slices = pack_slices(blocks, cfg)
     names = []
     for i, sl in enumerate(slices, start=1):
         name = f"{i:03d}.jpg"
         _write_jpeg(slice_dir / name, sl, quality)
         names.append(name)
+        if progress is not None:
+            progress(i, len(slices), f"Wrote slice {name}")
 
     long_path = project_dir / "export" / "long-strip.jpg"
     if slices:
