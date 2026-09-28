@@ -24,3 +24,10 @@ def test_name_is_slugified_for_the_filesystem(tmp_path):
 def test_blank_name_still_produces_a_directory(tmp_path):
     got = unique_chapter_dir(tmp_path, "   ")
     assert got.name
+
+
+def test_windows_reserved_device_names_are_rewritten(tmp_path):
+    assert unique_chapter_dir(tmp_path, "CON").name == "CON-chapter"
+    assert unique_chapter_dir(tmp_path, "nul").name == "nul-chapter"
+    assert unique_chapter_dir(tmp_path, "COM1").name == "COM1-chapter"
+    assert unique_chapter_dir(tmp_path, "NUL.txt").name == "NUL.txt-chapter"

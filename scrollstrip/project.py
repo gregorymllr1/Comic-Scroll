@@ -61,6 +61,13 @@ def page_stem(index: int, source_name: str) -> str:
 
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
+# Device names Windows refuses to create, including with an extension (NUL.txt).
+_RESERVED = frozenset({
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+})
+
 
 def unique_chapter_dir(root: Path, name: str) -> Path:
     """A fresh directory for a new chapter.
@@ -71,6 +78,9 @@ def unique_chapter_dir(root: Path, name: str) -> Path:
     """
     slug = _UNSAFE.sub("-", (name or "").strip()).strip(". -")
     slug = slug or "chapter"
+    # Rewrite before the collision loop so CON-chapter-2 still works.
+    if slug.split(".", 1)[0].upper() in _RESERVED:
+        slug = f"{slug}-chapter"
     candidate = Path(root) / slug
     counter = 2
     while candidate.exists():
