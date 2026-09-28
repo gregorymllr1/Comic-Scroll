@@ -37,8 +37,19 @@ def cached_resize(project_dir: Path, rel: str, width: int | None) -> Path:
         if probe.width <= width:
             return source
 
-    target = Path(project_dir) / "work" / "cache" / str(width) / f"{rel.replace('/', '_')}"
-    target = target.with_suffix(".jpg")
+    # Raw `rel` can still contain `\` and `..`. pathlib treats those as
+    # separators, so the cache name comes from the resolved in-project path.
+    resolved_project = Path(project_dir).resolve()
+    filename = (
+        source.relative_to(resolved_project).as_posix().replace("/", "_").replace("\\", "_")
+    )
+    width_dir = Path(project_dir) / "work" / "cache" / str(width)
+    target = (width_dir / filename).with_suffix(".jpg")
+    resolved_target = target.resolve()
+    try:
+        resolved_target.relative_to(width_dir.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Cache path escapes the project: {rel}") from exc
     if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
         return target
     target.parent.mkdir(parents=True, exist_ok=True)

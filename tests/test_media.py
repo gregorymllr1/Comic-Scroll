@@ -55,3 +55,16 @@ def test_absurd_width_is_clamped(tmp_path):
     d = make_project(tmp_path)
     got = cached_resize(d, "work/cleaned/p1.jpg", 100_000)
     assert Image.open(got).size[0] <= MAX_WIDTH
+
+
+def test_backslash_dotdot_cache_stays_in_width_dir(tmp_path):
+    d = make_project(tmp_path)
+    # Forward-slash pads give resolve_media enough depth to stay in-project.
+    # Backslash ".." segments stay separators in the cache join on Windows.
+    rel = "a/b/c/d/e\\..\\..\\..\\..\\..\\work\\cleaned\\p1.jpg"
+    source = resolve_media(d, rel)
+    assert source == (d / "work" / "cleaned" / "p1.jpg").resolve()
+    got = cached_resize(d, rel, 200)
+    cache_dir = (d / "work" / "cache" / "200").resolve()
+    assert cache_dir in got.resolve().parents
+    assert Image.open(got).size[0] == 200
