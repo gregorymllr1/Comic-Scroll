@@ -86,6 +86,7 @@ class JobQueue:
             if job["state"] == "queued":
                 job["state"] = "cancelled"
                 job["finished"] = time.time()
+                self._fns.pop(job_id, None)
         self._publish(job_id)
         return True
 
@@ -126,6 +127,7 @@ class JobQueue:
             with self._lock:
                 job = self._jobs.get(job_id)
                 if not job or job["state"] != "queued":
+                    self._fns.pop(job_id, None)
                     continue
                 job["state"] = "running"
                 fn = self._fns.pop(job_id, None)
@@ -140,6 +142,7 @@ class JobQueue:
             def should_cancel(_id=job_id) -> bool:
                 return _id in self._cancelled
 
+            log = None
             try:
                 if fn is None:
                     raise RuntimeError("job function missing")
@@ -150,10 +153,13 @@ class JobQueue:
             except Exception as exc:  # noqa: BLE001 - one bad job must not kill the worker
                 state = "failed"
                 error = f"{exc}"
-                log = _write_traceback(job_id, exc)
+                try:
+                    log = _write_traceback(job_id, exc)
+                except Exception:  # noqa: BLE001 - a log failure must not strand the job
+                    log = None
             with self._lock:
                 j = self._jobs[job_id]
                 j["state"], j["error"], j["finished"] = state, error, time.time()
-                if state == "failed":
+                if state == "failed" and log is not None:
                     j["log"] = str(log)
             self._publish(job_id)

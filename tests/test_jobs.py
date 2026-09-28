@@ -1,8 +1,10 @@
 # tests/test_jobs.py
 from __future__ import annotations
 
+import gc
 import threading
 import time
+import weakref
 
 import pytest
 
@@ -130,3 +132,48 @@ def test_missing_source_file_fails_readably_without_stalling_the_queue(q):
 
     after = q.submit("clean", "ch2", lambda p, c: None)
     wait_for(q, after, "done")
+
+
+def test_cancel_queued_drops_callable_and_other_queue_still_runs(q):
+    release = threading.Event()
+    q.submit("clean", "ch1", lambda p, c: release.wait(2.0))
+
+    def cancelled_work(progress, should_cancel):
+        raise AssertionError("cancelled job ran")
+
+    held = weakref.ref(cancelled_work)
+    second = q.submit("clean", "ch2", cancelled_work)
+    assert q.cancel(second) is True
+    del cancelled_work
+    gc.collect()
+    assert held() is None
+
+    release.set()
+    wait_for(q, second, "cancelled")
+    later = q.submit("clean", "ch3", lambda p, c: None)
+    wait_for(q, later, "done")
+
+    other = JobQueue()
+    try:
+        jid = other.submit("clean", "ch9", lambda p, c: None)
+        wait_for(other, jid, "done")
+    finally:
+        other.shutdown()
+
+
+def test_log_write_failure_marks_job_failed_and_keeps_worker(q, monkeypatch):
+    def broken_log_dir():
+        raise OSError("disk full")
+
+    monkeypatch.setattr("scrollstrip.app.jobs.log_dir", broken_log_dir)
+
+    def boom(progress, should_cancel):
+        raise RuntimeError("detector exploded")
+
+    failed = q.submit("detect", "ch1", boom)
+    job = wait_for(q, failed, "failed")
+    assert job["error"] == "detector exploded"
+    assert job["log"] is None
+
+    ok = q.submit("clean", "ch2", lambda p, c: None)
+    wait_for(q, ok, "done")
