@@ -56,31 +56,55 @@ def place_on_canvas(panel_img: np.ndarray, canvas_width: int, background: tuple[
     return canvas
 
 
-def iter_assembled_blocks(project_dir: Path, project: dict, cfg: dict):
-    canvas_width = int(cfg.get("canvas_width", 1080))
-    background = tuple(int(c) for c in cfg.get("background", [18, 18, 18]))
+def iter_panel_placements(project: dict, cfg: dict):
+    """Decide what is shown, in what order, at what scale, with what gap after.
+
+    This is the single source of reading order and gutter sizing. Both the CBZ
+    export and the in-app reader consume it, so the preview cannot drift from
+    what actually gets exported.
+    """
     for page in project["pages"]:
         if page.get("kind") == "skip":
             continue
-        cleaned = project_dir / page["cleaned"]
-        if not cleaned.exists():
-            raise FileNotFoundError(cleaned)
-        image = _read(cleaned)
         panels = sorted_panels(page)
         if not panels:
-            # Treat the whole cleaned page as one splash panel.
-            fitted = fit_width(image, canvas_width, 1.0)
-            block = place_on_canvas(fitted, canvas_width, background)
-            gap = gutter_px(cfg.get("heuristics", {}).get("page_break_gutter", "large"), cfg)
-            yield block, gap
+            yield {
+                "page_id": page["id"],
+                "cleaned": page["cleaned"],
+                "bbox": None,
+                "scale": 1.0,
+                "gutter_after": gutter_px(
+                    cfg.get("heuristics", {}).get("page_break_gutter", "large"), cfg
+                ),
+            }
             continue
-        for i, panel in enumerate(panels):
-            crop = crop_panel(image, panel["bbox"])
-            fitted = fit_width(crop, canvas_width, float(panel.get("scale", 1.0)))
-            block = place_on_canvas(fitted, canvas_width, background)
-            gap = gutter_px(panel.get("gutter_after", cfg.get("default_gutter", "medium")), cfg)
-            # Last panel on a page already carries the page-break gutter from detect heuristics.
-            yield block, gap
+        for panel in panels:
+            yield {
+                "page_id": page["id"],
+                "cleaned": page["cleaned"],
+                "bbox": list(panel["bbox"]),
+                "scale": float(panel.get("scale", 1.0)),
+                "gutter_after": gutter_px(
+                    panel.get("gutter_after", cfg.get("default_gutter", "medium")), cfg
+                ),
+            }
+
+
+def iter_assembled_blocks(project_dir: Path, project: dict, cfg: dict):
+    canvas_width = int(cfg.get("canvas_width", 1080))
+    background = tuple(int(c) for c in cfg.get("background", [18, 18, 18]))
+    cache: dict[str, np.ndarray] = {}
+    for place in iter_panel_placements(project, cfg):
+        cleaned = project_dir / place["cleaned"]
+        if not cleaned.exists():
+            raise FileNotFoundError(cleaned)
+        image = cache.get(place["cleaned"])
+        if image is None:
+            image = _read(cleaned)
+            cache = {place["cleaned"]: image}  # only the current page is kept
+        source = image if place["bbox"] is None else crop_panel(image, place["bbox"])
+        fitted = fit_width(source, canvas_width, place["scale"])
+        yield place_on_canvas(fitted, canvas_width, background), place["gutter_after"]
 
 
 def pack_slices(blocks: list[tuple[np.ndarray, int]], cfg: dict) -> list[np.ndarray]:
