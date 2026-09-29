@@ -362,11 +362,19 @@ def detect_project(
     *,
     progress=None,
     should_cancel=None,
+    only_page_id=None,
 ) -> dict:
     project = load_project(project_dir)
+    if only_page_id is not None and not any(
+        page.get("id") == only_page_id for page in project["pages"]
+    ):
+        raise FileNotFoundError(f"No page {only_page_id}")
     quality = int(cfg.get("jpeg_quality", 92))
     total = len(project["pages"])
     for index, page in enumerate(project["pages"], start=1):
+        # A one-page redetect must not rewrite every other page.
+        if only_page_id is not None and page.get("id") != only_page_id:
+            continue
         if should_cancel is not None and should_cancel():
             raise JobCancelled(f"Cancelled after {index - 1} of {total} pages")
         cleaned = project_dir / page["cleaned"]
@@ -379,8 +387,8 @@ def detect_project(
         locked = [p for p in page.get("panels", []) if p.get("locked")]
         # --keep-edits leaves any already-detected page untouched. It used to skip
         # only pages with NO locked boxes, so locking one box discarded every
-        # other manual edit on that page.
-        if page.get("panels") and not overwrite_unlocked:
+        # other manual edit on that page. only_page_id still redetects that page.
+        if only_page_id is None and page.get("panels") and not overwrite_unlocked:
             continue
         detections = detect_page(image, project_dir, cfg)
         auto_panels = detections_to_panels(detections, w, h, cfg, page["id"])

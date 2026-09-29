@@ -183,7 +183,8 @@ def assemble_project(project_dir: Path, cfg: dict, *, progress=None, should_canc
         elif long_path.exists():
             long_path.unlink()
 
-    cbz_name = f"{project.get('name', project_dir.name)}.cbz"
+    # Directory slug is already Windows-safe. The display name may contain ':'.
+    cbz_name = f"{project_dir.name}.cbz"
     cbz_path = project_dir / "export" / cbz_name
     with zipfile.ZipFile(cbz_path, "w", compression=zipfile.ZIP_STORED) as zf:
         for name in names:

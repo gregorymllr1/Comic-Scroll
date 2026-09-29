@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
 import numpy as np
 import pytest
@@ -67,3 +68,33 @@ def test_preview_carries_canvas_width_and_background(client):
     body = client.get("/api/project/ch1/preview").json()
     assert body["canvas_width"] == 1080
     assert body["background"] == [18, 18, 18]
+
+
+def test_preview_src_encodes_hash_in_chapter_id_and_cleaned_segment(tmp_path):
+    root = tmp_path / "lib"
+    chapter = "Spider-Man #1"
+    cleaned = "work/cleaned/issue #1.jpg"
+    chapter_dir = root / chapter
+    (chapter_dir / "work" / "cleaned").mkdir(parents=True)
+    Image.fromarray(np.full((40, 30, 3), 20, np.uint8)).save(chapter_dir / "work" / "cleaned" / "issue #1.jpg")
+    (chapter_dir / "project.json").write_text(json.dumps({
+        "name": chapter, "version": 1, "config": {},
+        "pages": [{
+            "id": "p1", "cleaned": cleaned, "kind": "splash",
+            "status": "detected", "panels": [],
+        }],
+    }), encoding="utf-8")
+    app = create_app(root=root)
+    try:
+        with TestClient(app) as client:
+            body = client.get("/api/project/" + quote(chapter, safe="") + "/preview").json()
+            src = body["panels"][0]["src"]
+            expected = "/media/" + "/".join(
+                quote(segment, safe="") for segment in [chapter, *cleaned.split("/")]
+            )
+            assert src == expected
+            assert "#" not in src
+            assert "%23" in src
+            assert client.get(src).status_code == 200
+    finally:
+        app.state.jobs.shutdown()

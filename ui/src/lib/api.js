@@ -19,8 +19,11 @@ export const getProject = (id) => request(`/api/project/${encodeURIComponent(id)
 export const putPage = (id, pageId, body) =>
   request(`/api/project/${encodeURIComponent(id)}/page/${encodeURIComponent(pageId)}`,
           { method: 'PUT', body })
-export const postDetect = (id, keepEdits = false) =>
-  request(`/api/project/${encodeURIComponent(id)}/detect`, { method: 'POST', body: { keep_edits: keepEdits } })
+export const postDetect = (id, keepEdits = false, pageId = null) =>
+  request(`/api/project/${encodeURIComponent(id)}/detect`, {
+    method: 'POST',
+    body: pageId != null ? { page_id: pageId } : { keep_edits: keepEdits },
+  })
 export const postAssemble = (id) =>
   request(`/api/project/${encodeURIComponent(id)}/assemble`, { method: 'POST' })
 export const getPreview = (id) => request(`/api/project/${encodeURIComponent(id)}/preview`)

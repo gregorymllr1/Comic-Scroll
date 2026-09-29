@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import sys
+import time
+import types
 
 import pytest
 from fastapi.testclient import TestClient
@@ -69,3 +72,72 @@ def test_editing_is_refused_while_a_job_is_running_on_that_chapter(client):
     release.set()
     assert r.status_code == 409
     assert "running" in r.json()["message"].lower()
+
+
+def _wait_job(client, job_id):
+    for _ in range(100):
+        match = next((job for job in client.get("/api/jobs").json() if job["id"] == job_id), None)
+        if match and match["state"] in {"done", "failed", "cancelled"}:
+            return match
+        time.sleep(0.05)
+    raise AssertionError("job did not finish")
+
+
+def test_detect_page_id_is_forwarded_and_keep_edits_is_not(client, monkeypatch):
+    seen = []
+
+    def fake(project_dir, cfg, overwrite_unlocked=True, *, progress=None, should_cancel=None, only_page_id=None):
+        seen.append({"only_page_id": only_page_id, "overwrite_unlocked": overwrite_unlocked})
+
+    monkeypatch.setattr("scrollstrip.app.server.detect_project", fake)
+    first = client.post("/api/project/ch1/detect", json={"page_id": "p1", "keep_edits": True})
+    assert first.status_code == 200
+    assert _wait_job(client, first.json()["job_id"])["state"] == "done"
+    second = client.post("/api/project/ch1/detect", json={"keep_edits": True})
+    assert second.status_code == 200
+    assert _wait_job(client, second.json()["job_id"])["state"] == "done"
+    assert seen[0] == {"only_page_id": "p1", "overwrite_unlocked": False}
+    assert seen[1] == {"only_page_id": None, "overwrite_unlocked": False}
+
+
+def test_open_dialog_invokes_on_the_ui_thread(client, monkeypatch):
+    events = []
+
+    class Native:
+        InvokeRequired = True
+
+        def Invoke(self, fn):
+            events.append("invoke")
+            try:
+                return fn()
+            finally:
+                events.append("invoke-return")
+
+    class Window:
+        def __init__(self):
+            self.native = Native()
+
+        def create_file_dialog(self, dialog_type, allow_multiple=False, file_types=()):
+            events.append("dialog")
+            assert dialog_type == "open"
+            return [r"C:\comics\book.cbz"]
+
+    mod = types.ModuleType("webview")
+    mod.windows = [Window()]
+    mod.OPEN_DIALOG = "open"
+    mod.FOLDER_DIALOG = "folder"
+    monkeypatch.setitem(sys.modules, "webview", mod)
+
+    res = client.post("/api/dialog/open", json={})
+    assert res.status_code == 200
+    assert res.json() == {"path": r"C:\comics\book.cbz"}
+    assert events == ["invoke", "dialog", "invoke-return"]
+
+
+def test_open_dialog_without_a_window_is_unavailable(client, monkeypatch):
+    mod = types.ModuleType("webview")
+    mod.windows = []
+    monkeypatch.setitem(sys.modules, "webview", mod)
+    res = client.post("/api/dialog/open", json={})
+    assert res.status_code == 200
+    assert res.json() == {"path": None, "unavailable": True}

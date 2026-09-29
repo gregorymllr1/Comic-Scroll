@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -28,6 +29,25 @@ class ImportRequest(BaseModel):
     name: str | None = None
     engine: str | None = None
     width: int | None = None
+
+
+def encode_media_path(chapter_id: str, cleaned: str) -> str:
+    """Percent-encode each path segment. Slashes in cleaned stay separators."""
+    segments = "/".join(quote(segment, safe="") for segment in str(cleaned).split("/"))
+    return f"/media/{quote(str(chapter_id), safe='')}/{segments}"
+
+
+def _invoke_on_ui(native, fn):
+    """Run fn on the control's UI thread and return its result.
+
+    WinForms Invoke requires a Delegate; a test double accepts the callable.
+    """
+    try:
+        return native.Invoke(fn)
+    except TypeError:
+        from System import Func, Object
+
+        return native.Invoke(Func[Object](fn))
 
 
 def reserve_chapter_dir(root: Path, name: str) -> Path:
@@ -167,12 +187,18 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
     def post_detect(chapter_id: str, body: dict | None = None):
         _require_idle(chapter_id)
         project_dir = chapter_dir(app.state.root, chapter_id)
-        keep_edits = bool((body or {}).get("keep_edits", False))
+        payload = body or {}
+        keep_edits = bool(payload.get("keep_edits", False))
+        page_id = payload.get("page_id")
 
         def work(progress, should_cancel):
             cfg = merged_config(project_dir)
-            detect_project(project_dir, cfg, overwrite_unlocked=not keep_edits,
-                           progress=progress, should_cancel=should_cancel)
+            # page_id redetects that page even when keep_edits is set.
+            detect_project(
+                project_dir, cfg, overwrite_unlocked=not keep_edits,
+                progress=progress, should_cancel=should_cancel,
+                **({"only_page_id": page_id} if page_id else {}),
+            )
 
         return {"job_id": app.state.jobs.submit("detect", chapter_id, work)}
 
@@ -206,7 +232,7 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
         panels = [
             {
                 "page_id": place["page_id"],
-                "src": f"/media/{chapter_id}/{place['cleaned']}",
+                "src": encode_media_path(chapter_id, place["cleaned"]),
                 "bbox": place["bbox"],
                 "scale": place["scale"],
                 "gutter_after": place["gutter_after"],
@@ -230,12 +256,23 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
         if not windows:
             return {"path": None, "unavailable": True}
         folders = bool((body or {}).get("folder"))
-        result = windows[0].create_file_dialog(
-            webview.FOLDER_DIALOG if folders else webview.OPEN_DIALOG,
-            allow_multiple=False,
-            file_types=() if folders else ("Comics (*.cbz;*.zip;*.pdf)", "All files (*.*)"),
-        )
-        return {"path": result[0] if result else None}
+        window = windows[0]
+
+        def show():
+            result = window.create_file_dialog(
+                webview.FOLDER_DIALOG if folders else webview.OPEN_DIALOG,
+                allow_multiple=False,
+                file_types=() if folders else ("Comics (*.cbz;*.zip;*.pdf)", "All files (*.*)"),
+            )
+            return result[0] if result else None
+
+        # ShowDialog must run on the STA UI thread. A worker call returns None.
+        native = getattr(window, "native", None)
+        if native is not None and getattr(native, "InvokeRequired", False):
+            path = _invoke_on_ui(native, show)
+        else:
+            path = show()
+        return {"path": path}
 
     dist = Path(__file__).resolve().parent.parent / "web_dist"
     if dist.is_dir():

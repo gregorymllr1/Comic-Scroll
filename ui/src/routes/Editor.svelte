@@ -1,52 +1,159 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
+  import { get } from 'svelte/store'
   import PanelCanvas from '../lib/PanelCanvas.svelte'
   import { getProject, putPage, postDetect, postAssemble } from '../lib/api.js'
-  import { showError } from '../lib/stores.js'
+  import { jobs, showError } from '../lib/stores.js'
 
-  export let chapterId, onBack, onRead
+  export let chapterId, onBack, onRead, initialPageId = null
 
   let project = null, pageIndex = 0, selectedIndex = -1, saveTimer
+  let loading = true, loadError = null, alive = true, moving = false
+  let saveQueue = Promise.resolve(true)
+  let saveFailed = false
+  let editGeneration = 0
+  let pendingDetectId = null
+  let detectStayId = null
 
   $: page = project?.pages?.[pageIndex] ?? null
   $: selected = page?.panels?.[selectedIndex] ?? null
 
-  onMount(async () => {
-    try {
-      project = await getProject(chapterId)
-      // Open on the first page detection was unsure about, not always page 1.
-      const flagged = project.pages.findIndex((p) => p.needs_review)
-      pageIndex = flagged >= 0 ? flagged : 0
-    } catch (err) { showError(err) }
-  })
+  function mediaSrc(id, cleaned, width) {
+    const path = String(cleaned || '').split('/').map((segment) => encodeURIComponent(segment)).join('/')
+    return `/media/${encodeURIComponent(id)}/${path}?w=${width}`
+  }
+
+  function openingIndex(pages) {
+    if (initialPageId) {
+      const chosen = pages.findIndex((p) => p.id === initialPageId)
+      if (chosen >= 0) return chosen
+    }
+    const flagged = pages.findIndex((p) => p.needs_review)
+    return flagged >= 0 ? flagged : 0
+  }
+
+  // Frozen at send time: the page array is mutated in place by the next edit.
+  function snapshot(target) {
+    return {
+      panels: structuredClone(target.panels ?? []),
+      kind: target.kind,
+      needs_review: false,
+    }
+  }
+
+  function startSave(target) {
+    if (!target) return saveQueue
+    const payload = snapshot(target)
+    const pageId = target.id
+    const generation = editGeneration
+    saveQueue = saveQueue.then(async () => {
+      // A re-detect reload superseded this page; don't write the old panels back.
+      if (generation !== editGeneration) return true
+      try {
+        await putPage(chapterId, pageId, payload)
+        if (generation !== editGeneration) return true
+        target.needs_review = false
+        project = project
+        saveFailed = false
+        return true
+      } catch (err) {
+        if (generation !== editGeneration) return true
+        saveFailed = true
+        showError(err)
+        return false
+      }
+    })
+    return saveQueue
+  }
 
   function queueSave() {
     clearTimeout(saveTimer)
     const target = page
-    saveTimer = setTimeout(() => { saveTimer = null; save(target) }, 600)
+    saveTimer = setTimeout(() => {
+      saveTimer = null
+      startSave(target)
+    }, 600)
   }
 
-  async function save(target) {
-    if (!target) return
-    try {
-      await putPage(chapterId, target.id, {
-        panels: target.panels, kind: target.kind, needs_review: false,
-      })
-      target.needs_review = false
-      project = project
-    } catch (err) { showError(err) }
-  }
-
-  function goToPage(index) {
-    if (index !== pageIndex) {
-      if (saveTimer) {
-        clearTimeout(saveTimer)
-        saveTimer = null
-        save(page)
-      }
-      pageIndex = index
+  async function flushSave() {
+    const target = page
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+      if (target) startSave(target)
+    } else if (saveFailed && target) {
+      startSave(target)
     }
-    selectedIndex = -1
+    return saveQueue
+  }
+
+  async function reloadAt(stayId) {
+    editGeneration += 1
+    clearTimeout(saveTimer)
+    saveTimer = null
+    saveFailed = false
+    try {
+      const fresh = await getProject(chapterId)
+      if (!alive) return
+      const idx = (fresh.pages || []).findIndex((p) => p.id === stayId)
+      project = fresh
+      if (idx >= 0) pageIndex = idx
+      else if (pageIndex >= (fresh.pages?.length || 0)) pageIndex = 0
+      selectedIndex = -1
+    } catch (err) {
+      if (!alive) return
+      showError(err)
+      if (page) queueSave()
+    }
+  }
+
+  function noteDetectJob(job) {
+    if (!pendingDetectId || !job || job.id !== pendingDetectId) return
+    if (job.state !== 'done' && job.state !== 'failed' && job.state !== 'cancelled') return
+    const stay = detectStayId
+    const state = job.state
+    pendingDetectId = null
+    if (state === 'done') reloadAt(stay)
+  }
+
+  const unsubscribeJobs = jobs.subscribe((list) => {
+    if (!pendingDetectId) return
+    noteDetectJob(list.find((item) => item.id === pendingDetectId))
+  })
+
+  onMount(async () => {
+    try {
+      project = await getProject(chapterId)
+      pageIndex = openingIndex(project.pages || [])
+    } catch (err) {
+      loadError = err
+      showError(err)
+    } finally {
+      loading = false
+    }
+  })
+
+  onDestroy(() => {
+    alive = false
+    unsubscribeJobs()
+  })
+
+  async function goToPage(index) {
+    if (!project?.pages?.length) return
+    if (index === pageIndex) {
+      selectedIndex = -1
+      return
+    }
+    if (index < 0 || index >= project.pages.length || moving) return
+    moving = true
+    try {
+      const ok = await flushSave()
+      if (!ok) return
+      pageIndex = index
+      selectedIndex = -1
+    } finally {
+      moving = false
+    }
   }
 
   function onChange(event) {
@@ -73,6 +180,7 @@
   const GUTTERS = ['tight', 'medium', 'large']
 
   function onKey(event) {
+    if (!project?.pages?.length) return
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT') return
     if (event.key === 'Delete') { deleteSelected(); event.preventDefault() }
     if (event.key === 'j') goToPage(Math.min(pageIndex + 1, project.pages.length - 1))
@@ -98,6 +206,33 @@
       event.preventDefault()
     }
   }
+
+  async function back() {
+    if (!(await flushSave())) return
+    onBack()
+  }
+
+  async function preview() {
+    if (!(await flushSave())) return
+    onRead()
+  }
+
+  async function exportCbz() {
+    if (!(await flushSave())) return
+    try { await postAssemble(chapterId) } catch (err) { showError(err) }
+  }
+
+  async function redetect() {
+    if (!(await flushSave())) return
+    const stay = page?.id
+    if (!stay) return
+    try {
+      const res = await postDetect(chapterId, false, stay)
+      pendingDetectId = res.job_id
+      detectStayId = stay
+      noteDetectJob(get(jobs).find((item) => item.id === res.job_id))
+    } catch (err) { showError(err) }
+  }
 </script>
 
 <svelte:window on:keydown={onKey} />
@@ -105,10 +240,10 @@
 {#if project && page}
   <div class="editor">
     <nav class="rail">
-      <button on:click={onBack}>← Library</button>
+      <button on:click={back}>← Library</button>
       {#each project.pages as p, i}
         <button class:active={i === pageIndex} on:click={() => goToPage(i)}>
-          <img src={`/media/${chapterId}/${p.cleaned}?w=140`} alt="" loading="lazy" />
+          <img src={mediaSrc(chapterId, p.cleaned, 140)} alt="" loading="lazy" />
           <span>{i + 1}</span>
           {#if p.needs_review}<span class="flag" title="Detection was unsure">!</span>{/if}
         </button>
@@ -117,7 +252,7 @@
 
     <main>
       <PanelCanvas
-        src={`/media/${chapterId}/${page.cleaned}?w=1200`}
+        src={mediaSrc(chapterId, page.cleaned, 1200)}
         imageW={page.width} imageH={page.height}
         panels={page.panels} {selectedIndex}
         on:change={onChange} on:select={(e) => (selectedIndex = e.detail)} />
@@ -131,7 +266,7 @@
           <option value="spread">spread</option><option value="skip">skip</option>
         </select>
       </label>
-      <button on:click={() => postDetect(chapterId, true).catch(showError)}>Re-detect page</button>
+      <button on:click={redetect}>Re-detect page</button>
 
       {#if selected}
         <h3>Panel {selectedIndex + 1}</h3>
@@ -159,10 +294,100 @@
       {/if}
 
       <hr />
-      <button on:click={onRead}>Preview scroll</button>
-      <button on:click={() => postAssemble(chapterId).catch(showError)}>Export CBZ</button>
+      <button on:click={preview}>Preview scroll</button>
+      <button on:click={exportCbz}>Export CBZ</button>
     </aside>
   </div>
 {:else}
-  <p>Loading…</p>
+  <div class="unopened">
+    <button on:click={back}>← Library</button>
+    {#if loadError}
+      <p>{loadError.message}</p>
+    {:else if project}
+      <p>This chapter has no pages.</p>
+    {:else if loading}
+      <p>Loading…</p>
+    {:else}
+      <p>Could not open this chapter.</p>
+    {/if}
+  </div>
 {/if}
+
+<style>
+  .editor {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr) 280px;
+    grid-template-rows: minmax(0, 1fr);
+    height: 100svh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .rail,
+  aside {
+    overflow: auto;
+    min-height: 0;
+    background: var(--panel);
+    padding: 8px;
+  }
+
+  .rail {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .rail button {
+    display: block;
+    width: 100%;
+  }
+
+  .rail img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .rail button.active {
+    border-color: var(--accent);
+  }
+
+  .flag {
+    color: #f5c16c;
+    font-weight: 700;
+  }
+
+  main {
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #111216;
+  }
+
+  main :global(.canvas-box) {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+  }
+
+  aside label {
+    display: block;
+    margin: 8px 0;
+  }
+
+  aside button,
+  aside select,
+  aside input {
+    margin-top: 4px;
+  }
+
+  .unopened {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+</style>

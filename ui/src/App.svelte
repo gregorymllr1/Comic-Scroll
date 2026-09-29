@@ -8,6 +8,7 @@
 
   let view = 'library'
   let activeChapterId = null
+  let editorPageId = null
   let unsubscribe
 
   onMount(async () => { unsubscribe = await startJobStream() })
@@ -15,16 +16,17 @@
 </script>
 
 {#if view === 'library'}
-  <Library onOpen={(id) => { activeChapterId = id; view = 'editor' }}
+  <Library onOpen={(id) => { activeChapterId = id; editorPageId = null; view = 'editor' }}
            onImport={() => (view = 'import')} />
 {:else if view === 'import'}
   <Import onDone={() => (view = 'library')} />
 {:else if view === 'editor'}
-  <Editor chapterId={activeChapterId} onBack={() => (view = 'library')}
+  <Editor chapterId={activeChapterId} initialPageId={editorPageId}
+          onBack={() => (view = 'library')}
           onRead={() => (view = 'reader')} />
 {:else if view === 'reader'}
   <Reader chapterId={activeChapterId} onBack={() => (view = 'editor')}
-          onEditPage={() => (view = 'editor')} />
+          onEditPage={(pageId) => { editorPageId = pageId; view = 'editor' }} />
 {/if}
 
 {#if $toast}
