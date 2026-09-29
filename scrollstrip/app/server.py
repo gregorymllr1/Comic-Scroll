@@ -9,7 +9,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ..assemble import assemble_project
+from ..assemble import assemble_project, iter_panel_placements
 from ..clean import clean_project
 from ..config import load_yaml, write_yaml
 from ..detect import detect_project
@@ -196,5 +196,26 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
         project_dir = chapter_dir(app.state.root, chapter_id)
         write_yaml(project_dir / "config.yaml", body)
         return merged_config(project_dir)
+
+    @app.get("/api/project/{chapter_id}/preview")
+    def get_preview(chapter_id: str):
+        project_dir = chapter_dir(app.state.root, chapter_id)
+        project = load_project(project_dir)
+        cfg = merged_config(project_dir, project)
+        panels = [
+            {
+                "page_id": place["page_id"],
+                "src": f"/media/{chapter_id}/{place['cleaned']}",
+                "bbox": place["bbox"],
+                "scale": place["scale"],
+                "gutter_after": place["gutter_after"],
+            }
+            for place in iter_panel_placements(project, cfg)
+        ]
+        return {
+            "canvas_width": int(cfg.get("canvas_width", 1080)),
+            "background": [int(c) for c in cfg.get("background", [18, 18, 18])],
+            "panels": panels,
+        }
 
     return app
