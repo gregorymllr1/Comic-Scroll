@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..clean import clean_project
+from ..config import load_yaml, write_yaml
 from ..detect import detect_project
 from ..ingest import describe_source
 from ..project import init_project, merged_config, unique_chapter_dir
@@ -26,10 +27,22 @@ class ImportRequest(BaseModel):
     width: int | None = None
 
 
+def reserve_chapter_dir(root: Path, name: str) -> Path:
+    """Pick a unique chapter path and create it, or try again if someone else won."""
+    while True:
+        target = unique_chapter_dir(root, name)
+        try:
+            target.mkdir(parents=True, exist_ok=False)
+            return target
+        except FileExistsError:
+            continue
+
+
 def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAPI:
     app = FastAPI(title="Scrollstrip")
     app.state.root = Path(root) if root else library_root()
     app.state.jobs = jobs or JobQueue()
+    app.state.import_names: dict[str, str] = {}
     app.state.root.mkdir(parents=True, exist_ok=True)
     app_errors.install(app)
 
@@ -43,7 +56,8 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
         # in-flight imports are merged in.
         pending = [
             {
-                "id": j["project_id"], "name": j.get("message") or j["project_id"],
+                "id": j["project_id"],
+                "name": app.state.import_names.get(j["project_id"]) or j["project_id"],
                 "page_count": 0, "panel_count": 0, "needs_review": 0,
                 "status": "processing", "updated": j["created"], "error": None,
             }
@@ -65,21 +79,24 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
                 "or use a folder of images or a .pdf."
             )
         name = req.name or source.stem
-        target = unique_chapter_dir(app.state.root, name)
-        # Reserve the folder before returning. unique_chapter_dir only checks
-        # exists(); without mkdir, a second import of the same name can pick
-        # the same path and later overwrite project.json.
-        target.mkdir(parents=True, exist_ok=True)
+        target = reserve_chapter_dir(app.state.root, name)
         project_id = target.name
+        app.state.import_names[project_id] = name
 
         def work(progress, should_cancel):
             progress(0, 3, f"Importing {name}")
             init_project(target, pages_dir=source, name=name)
             cfg = merged_config(target)
+            disk = load_yaml(target / "config.yaml")
             if req.width:
-                cfg["canvas_width"] = int(req.width)
+                width = int(req.width)
+                cfg["canvas_width"] = width
+                disk["canvas_width"] = width
             if req.engine:
                 cfg.setdefault("detect", {})["engine"] = req.engine
+                disk.setdefault("detect", {})["engine"] = req.engine
+            if req.width or req.engine:
+                write_yaml(target / "config.yaml", disk)
             clean_project(target, cfg, progress=progress, should_cancel=should_cancel)
             detect_project(target, cfg, progress=progress, should_cancel=should_cancel)
 

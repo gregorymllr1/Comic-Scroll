@@ -12,7 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from scrollstrip.app.library import chapter_dir
 from scrollstrip.app.server import create_app
+from scrollstrip.config import load_yaml
+from scrollstrip.project import merged_config
 
 
 @pytest.fixture
@@ -111,4 +114,78 @@ def test_same_name_imports_reserve_distinct_directories(client, tmp_path):
         assert second["project_id"] == f"{first['project_id']}-2"
     finally:
         release.set()
+
+
+def test_inflight_library_row_uses_requested_name(client, tmp_path):
+    started = threading.Event()
+    pause = threading.Event()
+    real_submit = client.app.state.jobs.submit
+
+    def submit(kind, project_id, fn):
+        def wrapped(progress, should_cancel):
+            def gated(done, total, message=""):
+                progress(done, total, message)
+                if message:
+                    started.set()
+                    pause.wait(5)
+            fn(gated, should_cancel)
+        return real_submit(kind, project_id, wrapped)
+
+    client.app.state.jobs.submit = submit
+    cbz = make_cbz(tmp_path / "book.cbz")
+    try:
+        body = client.post("/api/library/import", json={"source": str(cbz), "name": "Book"}).json()
+        assert started.wait(5.0), "import never started"
+        listed = client.get("/api/library").json()
+        row = next(c for c in listed if c["id"] == body["project_id"])
+        assert row["status"] == "processing"
+        assert row["name"] == "Book"
+        assert row["name"] != "Importing Book"
+        assert row["name"] != body["project_id"] or row["name"] == "Book"
+    finally:
+        pause.set()
+
+
+def test_import_persists_width_and_engine_in_chapter_config(client, tmp_path):
+    cbz = make_cbz(tmp_path / "book.cbz")
+    body = client.post(
+        "/api/library/import",
+        json={"source": str(cbz), "name": "Sized", "width": 800, "engine": "cv"},
+    ).json()
+    final = wait_for_job(client, body["job_id"])
+    assert final["state"] == "done", final.get("error")
+    project = chapter_dir(client.root, body["project_id"])
+    cfg = merged_config(project)
+    assert cfg["canvas_width"] == 800
+    assert cfg["detect"]["engine"] == "cv"
+    on_disk = load_yaml(project / "config.yaml")
+    assert on_disk.get("canvas_width") == 800
+    assert (on_disk.get("detect") or {}).get("engine") == "cv"
+
+
+def test_overlapping_reservations_do_not_share_a_directory(client, tmp_path, monkeypatch):
+    release = threading.Event()
+    client.app.state.jobs.submit("clean", "blocker", lambda p, c: release.wait(5))
+    import scrollstrip.app.server as server_mod
+
+    real = server_mod.unique_chapter_dir
+    calls = {"n": 0}
+
+    def steal(root, name):
+        calls["n"] += 1
+        path = real(root, name)
+        if calls["n"] == 1:
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr(server_mod, "unique_chapter_dir", steal)
+    cbz = make_cbz(tmp_path / "book.cbz")
+    try:
+        body = client.post("/api/library/import", json={"source": str(cbz), "name": "Book"}).json()
+        assert body["project_id"] != "Book"
+        assert body["project_id"] == "Book-2"
+        assert calls["n"] >= 2
+    finally:
+        release.set()
+
 
