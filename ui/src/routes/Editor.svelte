@@ -22,18 +22,31 @@
 
   function queueSave() {
     clearTimeout(saveTimer)
-    saveTimer = setTimeout(save, 600)
+    const target = page
+    saveTimer = setTimeout(() => { saveTimer = null; save(target) }, 600)
   }
 
-  async function save() {
-    if (!page) return
+  async function save(target) {
+    if (!target) return
     try {
-      await putPage(chapterId, page.id, {
-        panels: page.panels, kind: page.kind, needs_review: false,
+      await putPage(chapterId, target.id, {
+        panels: target.panels, kind: target.kind, needs_review: false,
       })
-      page.needs_review = false
+      target.needs_review = false
       project = project
     } catch (err) { showError(err) }
+  }
+
+  function goToPage(index) {
+    if (index !== pageIndex) {
+      if (saveTimer) {
+        clearTimeout(saveTimer)
+        saveTimer = null
+        save(page)
+      }
+      pageIndex = index
+    }
+    selectedIndex = -1
   }
 
   function onChange(event) {
@@ -62,8 +75,8 @@
   function onKey(event) {
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT') return
     if (event.key === 'Delete') { deleteSelected(); event.preventDefault() }
-    if (event.key === 'j') { pageIndex = Math.min(pageIndex + 1, project.pages.length - 1); selectedIndex = -1 }
-    if (event.key === 'k') { pageIndex = Math.max(pageIndex - 1, 0); selectedIndex = -1 }
+    if (event.key === 'j') goToPage(Math.min(pageIndex + 1, project.pages.length - 1))
+    if (event.key === 'k') goToPage(Math.max(pageIndex - 1, 0))
     if (event.key === 'Tab' && page?.panels?.length) {
       selectedIndex = (selectedIndex + 1) % page.panels.length
       event.preventDefault()
@@ -94,7 +107,7 @@
     <nav class="rail">
       <button on:click={onBack}>← Library</button>
       {#each project.pages as p, i}
-        <button class:active={i === pageIndex} on:click={() => { pageIndex = i; selectedIndex = -1 }}>
+        <button class:active={i === pageIndex} on:click={() => goToPage(i)}>
           <img src={`/media/${chapterId}/${p.cleaned}?w=140`} alt="" loading="lazy" />
           <span>{i + 1}</span>
           {#if p.needs_review}<span class="flag" title="Detection was unsure">!</span>{/if}
