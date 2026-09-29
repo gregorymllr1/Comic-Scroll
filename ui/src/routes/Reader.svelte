@@ -49,7 +49,7 @@
   <div class="scroll" style={`background: rgb(${preview.background.join(',')})`}>
     {#each preview.panels as panel, i}
       <div class="panel" style={cropStyle(panel)} on:click={() => onEditPage(panel.page_id)}>
-        <img src={`${panel.src}?w=${Math.round(width * 2)}`} style={imageStyle(panel, i)}
+        <img src={panel.src} style={imageStyle(panel, i)}
              alt="" loading="lazy" on:load={(e) => onImageLoad(e, i)} />
       </div>
       <div class="gutter" style={`height:${panel.gutter_after * (width / preview.canvas_width)}px`}>
