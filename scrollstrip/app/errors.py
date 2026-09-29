@@ -9,11 +9,17 @@ from fastapi.responses import JSONResponse
 from ..errors import JobCancelled
 from ..ingest import IngestError
 
+
+class ProjectBusy(Exception):
+    """An edit arrived while a job holds that project."""
+
+
 HINTS = {
     "IngestError": "Check the file is a folder, .cbz/.zip or .pdf that you can open.",
     "FileNotFoundError": "The file may have been moved or deleted since you chose it.",
     "NotADirectoryError": "Set SCROLLSTRIP_LIBRARY to a folder you can write to.",
     "PermissionError": "Close anything using the file, or pick a different folder.",
+    "ProjectBusy": "Wait for the running job to finish, or cancel it.",
 }
 
 STATUS = {
@@ -23,6 +29,7 @@ STATUS = {
     "NotADirectoryError": 500,
     "PermissionError": 500,
     "JobCancelled": 409,
+    "ProjectBusy": 409,
 }
 
 
@@ -41,6 +48,7 @@ def install(app) -> None:
     @app.exception_handler(PermissionError)
     @app.exception_handler(ValueError)
     @app.exception_handler(JobCancelled)
+    @app.exception_handler(ProjectBusy)
     async def handle(request: Request, exc: Exception):  # noqa: ANN001
         status, body = payload(exc)
         return JSONResponse(status_code=status, content=body)

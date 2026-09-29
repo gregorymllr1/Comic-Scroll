@@ -9,12 +9,14 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from ..assemble import assemble_project
 from ..clean import clean_project
 from ..config import load_yaml, write_yaml
 from ..detect import detect_project
 from ..ingest import describe_source
-from ..project import init_project, merged_config, unique_chapter_dir
+from ..project import init_project, load_project, merged_config, save_project, unique_chapter_dir
 from . import errors as app_errors
+from .errors import ProjectBusy
 from .jobs import JobQueue
 from .library import chapter_dir, library_root, list_chapters
 from .media import cached_resize
@@ -131,5 +133,68 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
     def media(chapter_id: str, path: str, w: int | None = Query(default=None)):
         project = chapter_dir(app.state.root, chapter_id)
         return FileResponse(cached_resize(project, path, w))
+
+    def _require_idle(project_id: str) -> None:
+        # A running stage holds the project dict in memory and saves it when it
+        # finishes, which would silently discard edits made in the meantime.
+        if project_id in app.state.jobs.active_project_ids():
+            raise ProjectBusy(f"A job is running on {project_id}; try again when it finishes.")
+
+    @app.get("/api/project/{chapter_id}")
+    def get_project(chapter_id: str):
+        return load_project(chapter_dir(app.state.root, chapter_id))
+
+    @app.put("/api/project/{chapter_id}/page/{page_id}")
+    def put_page(chapter_id: str, page_id: str, body: dict):
+        _require_idle(chapter_id)
+        project_dir = chapter_dir(app.state.root, chapter_id)
+        project = load_project(project_dir)
+        for page in project["pages"]:
+            if page["id"] == page_id:
+                if "panels" in body:
+                    page["panels"] = body["panels"]
+                if "kind" in body:
+                    page["kind"] = body["kind"]
+                if "needs_review" in body:
+                    page["needs_review"] = bool(body["needs_review"])
+                page["status"] = "reviewed"
+                save_project(project_dir, project)
+                return page
+        raise FileNotFoundError(f"No page {page_id} in {chapter_id}")
+
+    @app.post("/api/project/{chapter_id}/detect")
+    def post_detect(chapter_id: str, body: dict | None = None):
+        _require_idle(chapter_id)
+        project_dir = chapter_dir(app.state.root, chapter_id)
+        keep_edits = bool((body or {}).get("keep_edits", False))
+
+        def work(progress, should_cancel):
+            cfg = merged_config(project_dir)
+            detect_project(project_dir, cfg, overwrite_unlocked=not keep_edits,
+                           progress=progress, should_cancel=should_cancel)
+
+        return {"job_id": app.state.jobs.submit("detect", chapter_id, work)}
+
+    @app.post("/api/project/{chapter_id}/assemble")
+    def post_assemble(chapter_id: str):
+        _require_idle(chapter_id)
+        project_dir = chapter_dir(app.state.root, chapter_id)
+
+        def work(progress, should_cancel):
+            cfg = merged_config(project_dir)
+            assemble_project(project_dir, cfg, progress=progress, should_cancel=should_cancel)
+
+        return {"job_id": app.state.jobs.submit("assemble", chapter_id, work)}
+
+    @app.get("/api/project/{chapter_id}/config")
+    def get_config(chapter_id: str):
+        return merged_config(chapter_dir(app.state.root, chapter_id))
+
+    @app.put("/api/project/{chapter_id}/config")
+    def put_config(chapter_id: str, body: dict):
+        _require_idle(chapter_id)
+        project_dir = chapter_dir(app.state.root, chapter_id)
+        write_yaml(project_dir / "config.yaml", body)
+        return merged_config(project_dir)
 
     return app
