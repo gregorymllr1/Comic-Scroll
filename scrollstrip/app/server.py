@@ -66,6 +66,10 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
             )
         name = req.name or source.stem
         target = unique_chapter_dir(app.state.root, name)
+        # Reserve the folder before returning. unique_chapter_dir only checks
+        # exists(); without mkdir, a second import of the same name can pick
+        # the same path and later overwrite project.json.
+        target.mkdir(parents=True, exist_ok=True)
         project_id = target.name
 
         def work(progress, should_cancel):

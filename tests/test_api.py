@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 import time
 import zipfile
 
@@ -96,3 +97,18 @@ def test_jobs_endpoint_lists_and_cancels(client, tmp_path):
     assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
     final = wait_for_job(client, job_id)
     assert final["state"] in {"cancelled", "done"}
+
+
+def test_same_name_imports_reserve_distinct_directories(client, tmp_path):
+    release = threading.Event()
+    client.app.state.jobs.submit("clean", "blocker", lambda p, c: release.wait(5))
+    first_src = make_cbz(tmp_path / "one.cbz")
+    second_src = make_cbz(tmp_path / "two.cbz")
+    first = client.post("/api/library/import", json={"source": str(first_src), "name": "Book"}).json()
+    second = client.post("/api/library/import", json={"source": str(second_src), "name": "Book"}).json()
+    try:
+        assert first["project_id"] != second["project_id"]
+        assert second["project_id"] == f"{first['project_id']}-2"
+    finally:
+        release.set()
+
