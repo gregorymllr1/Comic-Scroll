@@ -26,6 +26,11 @@ node_modules/
 dist/
 scrollstrip/web_dist/
 
+# PyInstaller
+build/
+packaging/dist/
+*.spec.bak
+
 # OS
 .DS_Store
 Thumbs.db
