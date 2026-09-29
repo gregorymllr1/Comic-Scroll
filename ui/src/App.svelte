@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import Library from './routes/Library.svelte'
   import Import from './routes/Import.svelte'
+  import Editor from './routes/Editor.svelte'
   import { startJobStream, toast } from './lib/stores.js'
 
   let view = 'library'
@@ -17,6 +18,9 @@
            onImport={() => (view = 'import')} />
 {:else if view === 'import'}
   <Import onDone={() => (view = 'library')} />
+{:else if view === 'editor'}
+  <Editor chapterId={activeChapterId} onBack={() => (view = 'library')}
+          onRead={() => (view = 'reader')} />
 {/if}
 
 {#if $toast}
