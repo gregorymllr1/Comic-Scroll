@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..assemble import assemble_project, iter_panel_placements
@@ -217,5 +218,9 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
             "background": [int(c) for c in cfg.get("background", [18, 18, 18])],
             "panels": panels,
         }
+
+    dist = Path(__file__).resolve().parent.parent / "web_dist"
+    if dist.is_dir():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="ui")
 
     return app

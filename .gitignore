@@ -24,6 +24,7 @@ export/
 # Frontend (phase 1+)
 node_modules/
 dist/
+scrollstrip/web_dist/
 
 # OS
 .DS_Store
