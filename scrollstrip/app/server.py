@@ -219,6 +219,24 @@ def create_app(root: Path | None = None, jobs: JobQueue | None = None) -> FastAP
             "panels": panels,
         }
 
+    @app.post("/api/dialog/open")
+    def open_dialog(body: dict | None = None):
+        """Native picker. Returns {path: str | None}."""
+        try:
+            import webview
+        except ImportError:
+            return {"path": None, "unavailable": True}
+        windows = webview.windows
+        if not windows:
+            return {"path": None, "unavailable": True}
+        folders = bool((body or {}).get("folder"))
+        result = windows[0].create_file_dialog(
+            webview.FOLDER_DIALOG if folders else webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=() if folders else ("Comics (*.cbz;*.zip;*.pdf)", "All files (*.*)"),
+        )
+        return {"path": result[0] if result else None}
+
     dist = Path(__file__).resolve().parent.parent / "web_dist"
     if dist.is_dir():
         app.mount("/", StaticFiles(directory=dist, html=True), name="ui")
