@@ -57,11 +57,11 @@ def cmd_assemble(args) -> None:
 
 
 def cmd_review(args) -> None:
-    from .server import serve
+    """The review UI is now the desktop app."""
+    from .shell import main as shell_main
 
-    project_dir = _project_dir(args)
-    load_project(project_dir)  # fail early
-    serve(project_dir, host=args.host, port=args.port)
+    print("Opening the Scrollstrip app. The old per-project review server has been replaced.")
+    shell_main()
 
 
 def cmd_run(args) -> None:
@@ -83,9 +83,9 @@ def cmd_run(args) -> None:
     print(f"  python -m scrollstrip review --project {project_dir}")
     print(f"  python -m scrollstrip assemble --project {project_dir}")
     if args.review:
-        from .server import serve
+        from .shell import main as shell_main
 
-        serve(project_dir, host=args.host, port=args.port)
+        shell_main()
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -35,7 +35,7 @@ python -m scrollstrip run \
   --pages ./scans/chapter-01 \
   --name "Watchmen-01"
 
-python -m scrollstrip review --project ./chapter-01
+python -m scrollstrip.shell
 # fix boxes, scales, gutters; click Save; click Assemble chapter
 
 # or from the shell after review:
@@ -57,7 +57,7 @@ Open the CBZ in a reader with **webtoon / continuous vertical / fit-width** mode
 | `init --pages SOURCE` | Create project from a folder, `.cbz`/`.zip`, or `.pdf` |
 | `clean` | Write `work/cleaned/*.jpg` |
 | `detect [--engine auto\|yolo\|cv]` | Fill `panels[]` on each page |
-| `review` | http://127.0.0.1:8765/ |
+| `review` | Open the Scrollstrip desktop app |
 | `assemble [--width 1080]` | Slices + CBZ |
 | `run` | init (optional) + clean + detect |
 
@@ -69,6 +69,8 @@ CBR and CB7 are not supported - convert to CBZ first. Entries that would escape 
 project directory, plus `__MACOSX/`, `.DS_Store` and `Thumbs.db`, are skipped.
 
 ## Review UI (this is the design step)
+
+Review happens in the Scrollstrip desktop app (`python -m scrollstrip.shell`), not a per-project browser server at `http://127.0.0.1:8765/`. Open a chapter from the library, then fix boxes, scales, and gutters before assembling.
 
 Automatic boxes fail on the usual suspects: insets, overlaps, borderless panels, balloons in the gutter, SFX used as borders, spreads, full-bleed splash pages, yellowed paper, screentone, faint gutters.
 
