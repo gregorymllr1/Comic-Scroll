@@ -1,103 +1,131 @@
-# Scrollstrip
+<div align="center">
+  <!-- You can add a logo image here if you have one -->
+  <h1>📜 Scrollstrip</h1>
+  <p><strong>Turn scanned comic pages into phone-ready vertical scrolls.</strong></p>
+</div>
 
-First-pass pipeline that turns scanned comic pages - a folder of images, a CBZ, or a PDF - into a phone-width vertical CBZ. Detection is automatic (YOLO, with an OpenCV fallback). Cleanup, scale, gutters, and bad boxes are meant to be corrected by a person before export.
+Scrollstrip is a first-pass pipeline that takes a folder of scanned comic images, a CBZ, or a PDF, and transforms them into a phone-width vertical CBZ (Webtoon format). 
 
-Use this only on comics you own, for personal reading.
+Detection is fully automatic using a YOLOv12 model (with an OpenCV fallback). Because automation isn't perfect, the tool includes a local desktop app to easily clean up, scale, adjust gutters, and fix bad bounding boxes before final export.
 
-## What it does
+> ⚠️ **Note:** Please use this tool only on comics you legally own, strictly for personal reading.
 
-0. **Ingest** - read pages from a folder, a `.cbz`/`.zip`, or a `.pdf`. Scanned PDF pages are lifted out at native resolution rather than re-rendered; other PDFs rasterize at `pdf_dpi`.
-1. **Clean** — crop scanner border, small deskew, even out lighting, light denoise, luminance sharpen. Colors stay close to the scan. Lettering is not redrawn.
-2. **Detect** — YOLOv12 comic-panel model (`mosesb/best-comic-panel-detection`) plus a contour fallback. Writes boxes into `project.json`.
-3. **Review** — local browser UI to move/resize/add/delete boxes, set scale and gutter, lock boxes, mark splash/spread/skip pages.
-4. **Assemble** — scale each panel to 1080px (or your width), stack with gutters, slice between panels, zip one CBZ per chapter.
+---
 
-## Install
+## ✨ How It Works
+
+The pipeline is broken down into four automated and semi-automated steps:
+
+1. 📥 **Ingest** — Reads pages from a folder, `.cbz`/`.zip`, or `.pdf`. Scanned PDF pages are lifted out at native resolution losslessly; other PDFs are rasterized at your defined `pdf_dpi`.
+2. 🧼 **Clean** — Automatically crops scanner borders, applies small deskew corrections, evens out lighting, applies light denoising, and sharpens luminance. Colors remain true to the original scan, and lettering is not redrawn.
+3. 🎯 **Detect** — Uses a YOLOv12 comic-panel model (`mosesb/best-comic-panel-detection`) alongside a contour fallback to find panels. Box coordinates are saved to `project.json`.
+4. 🖌️️ **Review (Manual)** — Opens a local desktop UI to review the automated detection. Move, resize, add, or delete boxes, set scales/gutters, lock boxes, and mark pages as splash/spread/skip.
+5. 🏗️ **Assemble** — Scales each panel (default 1080px width), stacks them with vertical gutters, slices the final strip into optimized segments, and zips them into a single CBZ per chapter.
+
+---
+
+## 🚀 Installation
+
+Requires Python 3. `ultralytics` requires a working PyTorch installation (CPU is perfectly fine). 
 
 ```bash
+# Clone the repository and enter the directory
 cd scrollstrip
+
+# Set up a virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-`ultralytics` needs a working PyTorch. CPU is fine. The first `detect` run downloads `best.pt` (~119 MB) into `models/`.
+*Note: The first time you run the `detect` command, the script will automatically download the YOLO weights (`best.pt`, ~119 MB) into the `models/` directory. If YOLO cannot load on your system, you can use `--engine cv`.*
 
-If YOLO cannot load, use `--engine cv`.
+---
 
-## Chapter workflow
+## 📖 Quick Start: Chapter Workflow
 
-Put one chapter in one folder of scans, already in reading order (`001.jpg`, `002.jpg`, …).
+Organize your source files so that one chapter is in one folder of scans, already in reading order (e.g., `001.jpg`, `002.jpg`, …).
 
+**1. Run the initial pipeline:**
 ```bash
 python -m scrollstrip run \
   --project ./chapter-01 \
   --pages ./scans/chapter-01 \
   --name "Watchmen-01"
+```
 
+**2. Review and fix in the UI:**
+```bash
 python -m scrollstrip.shell
-# fix boxes, scales, gutters; click Save; click Assemble chapter
+```
+*In the desktop app: Fix boxes, adjust scales/gutters, click **Save**, and then click **Assemble chapter**.*
 
-# or from the shell after review:
+*(Alternatively, assemble from the CLI after reviewing)*
+```bash
 python -m scrollstrip assemble --project ./chapter-01
 ```
 
-Output:
-
+**Output files generated:**
 - `chapter-01/export/001.jpg`, `002.jpg`, …
-- `chapter-01/export/Watchmen-01.cbz`
-- optional `chapter-01/export/long-strip.jpg` if the chapter is not enormous
+- `chapter-01/export/Watchmen-01.cbz` *(Open this in a comic reader using **webtoon / continuous vertical / fit-width** mode)*
+- `chapter-01/export/long-strip.jpg` *(Optional, generated if the chapter is not enormous)*
 
-Open the CBZ in a reader with **webtoon / continuous vertical / fit-width** mode.
+---
 
-## Commands
+## 🖥️ Commands Reference
 
 | Command | Purpose |
 |---|---|
-| `init --pages SOURCE` | Create project from a folder, `.cbz`/`.zip`, or `.pdf` |
-| `clean` | Write `work/cleaned/*.jpg` |
-| `detect [--engine auto\|yolo\|cv]` | Fill `panels[]` on each page |
-| `review` | Open the Scrollstrip desktop app |
-| `assemble [--width 1080]` | Slices + CBZ |
-| `run` | init (optional) + clean + detect |
+| `init --pages SOURCE` | Create project from a folder, `.cbz`/`.zip`, or `.pdf`. |
+| `clean` | Process and write cleaned images to `work/cleaned/*.jpg`. |
+| `detect` | Fill `panels[]` on each page. *(Optional: `--engine auto\|yolo\|cv`)* |
+| `review` | Open the Scrollstrip desktop app. |
+| `assemble` | Slice panels and generate the final CBZ. *(Optional: `--width 1080`)* |
+| `run` | Runs `init` (optional) + `clean` + `detect` in sequence. |
 
-`--link` on `init`/`run` records original paths instead of copying files. It applies
-to folder sources only; archives and PDFs must be extracted, so `--link` is ignored
-with a warning.
+**Important notes on initialization:**
+* `--link` on `init`/`run` records original paths instead of copying files to save space (folder sources only). Archives and PDFs must be extracted, so `--link` is ignored with a warning.
+* `CBR` and `CB7` are not supported — convert them to `CBZ` first. 
+* Entries that attempt to escape the project directory, as well as `__MACOSX/`, `.DS_Store`, and `Thumbs.db`, are automatically skipped.
 
-CBR and CB7 are not supported - convert to CBZ first. Entries that would escape the
-project directory, plus `__MACOSX/`, `.DS_Store` and `Thumbs.db`, are skipped.
+---
 
-## Review UI (this is the design step)
+## 🎨 The Review UI (Design Step)
 
-Review happens in the Scrollstrip desktop app (`python -m scrollstrip.shell`), not a per-project browser server at `http://127.0.0.1:8765/`. Open a chapter from the library, then fix boxes, scales, and gutters before assembling.
+> **Pro-Tip:** If you have a GIF or screenshot of the UI in action, place it here!
 
-Automatic boxes fail on the usual suspects: insets, overlaps, borderless panels, balloons in the gutter, SFX used as borders, spreads, full-bleed splash pages, yellowed paper, screentone, faint gutters.
+Reviewing is done via the Scrollstrip desktop app (`python -m scrollstrip.shell`). Open a chapter from your library, fix the layout, and assemble.
 
-For each bad page:
+Automatic boxes often struggle with insets, overlaps, borderless panels, speech balloons in the gutter, full-bleed splash pages, yellowed paper, and faint gutters. 
 
-- Drag a box, drag the white corner to resize
-- **Add box** for a missed panel
-- **Delete** a false positive
-- **Re-detect page** after you lock the boxes you already fixed
-- Set **role**
-  - `normal` — full content width
-  - `reaction` — default scale 0.78 (staccato / small insert)
-  - `splash` — full width, large gutter after
-- Set **gutter after** (this is the only remaining “page turn”)
-  - `tight` — 32px default, action and banter
-  - `medium` — 80px default, ordinary beat
-  - `large` — 280px default, reveal, punchline, scene or page change
-- **Lock** so a later detect pass will not overwrite that box
-- Page **kind**: `splash` / `spread` / `skip`
+For pages that need correction, you can:
+* **Adjust:** Drag a box or its white corners to resize.
+* **Add/Delete:** Add missing panels or delete false positives.
+* **Lock & Re-detect:** Lock the boxes you've manually fixed, then re-detect the rest of the page.
+* **Set Page Kind:** Mark a page as `splash`, `spread`, or `skip`.
 
-First-pass heuristics already guess some of this (tiny panels → reaction + tight gutter; huge/tall panels and last panel on a page → large gutter). They are starting points, not layout.
+### Panel Roles & Gutters
+Scrollstrip uses panel roles and gutter sizing to control the pacing of the vertical scroll. First-pass heuristics will attempt to guess these (e.g., tiny panels → reaction; huge panels → large gutter), but you can manually tune them:
 
-Assembly never cuts through a panel. If one splash is taller than `slice_max_height` (2000px), that panel becomes its own file.
+**Roles:**
+* `normal` — Full content width.
+* `reaction` — Default scale 0.78 (Used for staccato moments or small inserts).
+* `splash` — Full width, forces a large gutter afterward.
 
-## Config
+**Gutter After (The Vertical "Page Turn"):**
+* `tight` (32px) — Fast pacing, action, and banter.
+* `medium` (80px) — Ordinary beat, standard spacing.
+* `large` (280px) — Major reveal, punchline, or scene/page change.
 
-Edit `chapter-01/config.yaml`. Unknown keys are ignored; defaults live in `scrollstrip/config.py`.
+*Note: Assembly never cuts through a single panel. If a splash panel is taller than `slice_max_height` (2000px), that panel becomes its own dedicated image file.*
+
+---
+
+## ⚙️ Configuration
+
+Project settings are stored in `chapter-01/config.yaml`. Default fallback values live in `scrollstrip/config.py`. 
 
 ```yaml
 canvas_width: 1080
@@ -113,59 +141,58 @@ gutter_presets:
   large: 280
 default_gutter: medium
 clean:
-  flatten_strength: 0.35   # 0 = leave scan lighting alone
+  flatten_strength: 0.35       # 0 = leave scan lighting alone
   sharpen_amount: 0.28
   max_deskew_degrees: 6.0
-  max_illum_side: 512      # lighting is estimated at this size, then scaled up
-  crop_min_fill: 0.08      # column/row counts as content above this
-  crop_min_area_kept: 0.30 # refuse crops that drop more than this much
+  max_illum_side: 512          # lighting is estimated at this size, then scaled up
+  crop_min_fill: 0.08          # column/row counts as content above this
+  crop_min_area_kept: 0.30     # refuse crops that drop more than this much
 detect:
   engine: auto
   conf: 0.25
-  model_revision: null     # pin a commit sha for reproducible detection
-  min_coverage: 0.35       # below this, the first pass is treated as failed
+  model_revision: null         # pin a commit sha for reproducible detection
+  min_coverage: 0.35           # below this, the first pass is treated as failed
 heuristics:
   reaction_scale: 0.78
 ```
+> ⚠️ **Keep your `project.json` safe!** It acts as the ultimate source of truth for your layout and bounding boxes after you complete your review.
 
-`project.json` is the source of truth for boxes after review. Keep it.
+---
 
-## Where to start reviewing
+## 🧠 Under the Hood
 
-`detect` prints the pages whose first pass looks doubtful and marks them
-`needs_review` in `project.json`. The test is page coverage and box confidence,
-not box count, so a genuine one-panel splash is not flagged.
+### Where to start reviewing?
+The `detect` command automatically prints out pages whose first pass looks doubtful and marks them as `needs_review` in your `project.json`. This heuristic is based on page coverage and box confidence, *not* box count—so a clean, genuine one-panel splash page won't be falsely flagged.
 
-## Performance note
+### Performance Note
+The cleaning process downscales images to `working_max_side` before applying expensive filters. By estimating page lighting on a small copy rather than at full scan resolution, processing time drops drastically from ~128s per page to just **~1.6s per page**, with no visible loss in output quality.
 
-Cleaning downscales to `working_max_side` before the expensive filters, and
-estimates page lighting on a small copy. Doing that work at full scan resolution
-first - and then throwing 84% of the pixels away - cost about 128s per page
-against 1.6s now, with no visible difference in the output.
+### Cleaning Philosophy
+The built-in cleaner is intentionally conservative. Its goal is to "make this scan even and square," not to act generatively and "redraw this panel."
+* **Deskew** applies only when long panel-border lines confidently agree on a small tilt.
+* **Lighting flatten** uses blending rather than a harsh divide-by-background method.
+* **Sharpen** applies strictly to luminance, preventing color plates from fringing.
+* **Working copies** are capped so the editor remains highly responsive, even when starting from 300+ DPI raw scans.
 
-## Cleaning philosophy
+*If you prefer a heavier, AI-upscaled or generative cleanup look (e.g., Topaz, Magnific), run that on your problem pages externally and drop the results directly into `work/cleaned/` with the same filename. The detection and assembly pipeline will use them automatically.*
 
-The cleaner is conservative on purpose. It is closer to “make this scan even and square” than to a generative “redraw this panel.”
+---
 
-- Deskew only when long panel-border lines agree on a small tilt
-- Lighting flatten is blended, not a full divide-by-background
-- Sharpen is luminance-only so color plates do not fringe
-- Working copies are capped at `working_max_side` so the editor stays usable; always start from 300 dpi scans
+## 📂 Project Structure
 
-If you later want a heavier “Grok/Claude cleanup” look, run that on individual problem pages and drop the results into `work/cleaned/` under the same filename. Detection and assembly will use them.
+A typical Scrollstrip project looks like this. **One project folder = one final CBZ.** Start a new folder for each chapter.
 
-## Layout of a project
-
-```
+```text
 chapter-01/
-  config.yaml
-  project.json
-  pages/                 original scans
-  work/cleaned/          cleaned working copies
-  work/previews/         annotated detect previews
-  models/best.pt         downloaded YOLO weights
-  export/slices/         001.jpg …
-  export/*.cbz
+  ├── config.yaml
+  ├── project.json
+  ├── pages/                 # Original, untouched scans
+  ├── work/
+  │   ├── cleaned/           # Cleaned working copies
+  │   └── previews/          # Annotated detect previews
+  ├── models/
+  │   └── best.pt            # Downloaded YOLO weights
+  └── export/
+      ├── slices/            # 001.jpg, 002.jpg ...
+      └── Watchmen-01.cbz    # The final vertical scroll
 ```
-
-One project folder = one CBZ. Start a new folder for the next chapter.
