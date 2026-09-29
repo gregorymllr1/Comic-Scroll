@@ -14,7 +14,7 @@
 
   // The manifest gives crops in image space; CSS reproduces them without
   // compositing anything server-side.
-  function cropStyle(panel) {
+  function cropStyle(panel, width) {
     if (!panel.bbox) return `width:${width}px`
     const [, , w] = panel.bbox
     const factor = (width * panel.scale) / w
@@ -23,12 +23,11 @@
 
   // Percent width is relative to the crop box, not the source, so the bbox
   // would not fill. After load, size from naturalWidth * factor (px).
-  function imageStyle(panel, i) {
+  function imageStyle(panel, width, naturalWidth) {
     if (!panel.bbox) return `width:${width}px; display:block`
     const [x, y, w] = panel.bbox
     const factor = (width * panel.scale) / w
-    const nw = naturalWidths[i]
-    const size = nw == null ? '' : `width:${nw * factor}px;`
+    const size = naturalWidth == null ? '' : `width:${naturalWidth * factor}px;`
     return `position:absolute; left:${-x * factor}px; top:${-y * factor}px; ${size}
             transform-origin: top left; image-rendering:auto`
   }
@@ -48,8 +47,8 @@
 {#if preview}
   <div class="scroll" style={`background: rgb(${preview.background.join(',')})`}>
     {#each preview.panels as panel, i}
-      <div class="panel" style={cropStyle(panel)} on:click={() => onEditPage(panel.page_id)}>
-        <img src={panel.src} style={imageStyle(panel, i)}
+      <div class="panel" style={cropStyle(panel, width)} on:click={() => onEditPage(panel.page_id)}>
+        <img src={panel.src} style={imageStyle(panel, width, naturalWidths[i])}
              alt="" loading="lazy" on:load={(e) => onImageLoad(e, i)} />
       </div>
       <div class="gutter" style={`height:${panel.gutter_after * (width / preview.canvas_width)}px`}>
