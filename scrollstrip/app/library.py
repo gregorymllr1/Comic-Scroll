@@ -36,7 +36,9 @@ def chapter_dir(root: Path, chapter_id: str) -> Path:
 
 def _status(data: dict, chapter: Path, flagged: int) -> str:
     pages = data.get("pages") or []
-    if not any(p.get("status") == "detected" for p in pages):
+    # A saved page is "reviewed". Treat that like "detected" so the last
+    # edit does not send the library card back to "new".
+    if not any(p.get("status") in {"detected", "reviewed"} for p in pages):
         return "new"
     if flagged:
         return "needs_review"

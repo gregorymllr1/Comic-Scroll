@@ -50,6 +50,13 @@ def test_status_new_when_nothing_detected(tmp_path):
     assert list_chapters(tmp_path)[0]["status"] == "new"
 
 
+def test_reviewed_page_counts_as_detected_for_library_status(tmp_path):
+    write_chapter(tmp_path, "ch1", [page("a", status="reviewed")])
+    assert list_chapters(tmp_path)[0]["status"] == "reviewed"
+    write_chapter(tmp_path, "ch1", [page("a", status="reviewed", needs_review=True)])
+    assert list_chapters(tmp_path)[0]["status"] == "needs_review"
+
+
 def test_status_needs_review_when_any_page_flagged(tmp_path):
     write_chapter(tmp_path, "ch1", [page("a"), page("b", needs_review=True)])
     c = list_chapters(tmp_path)[0]
